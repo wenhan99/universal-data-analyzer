@@ -43,12 +43,12 @@ For **supervised** learning:
 ```bash
 python universal_dataset_ml_pipeline.py <file_path> --ml --target <TARGET_COLUMN> [--tune] [--drop COL1,COL2,...] [--model MODEL_NAME] [--save-model MODEL.pkl]
 ```
---ml: Executes ML pipeline.
---target: Target column for regression or classification.
---tune: (Optional) Perform hyperparameter tuning.
---drop: (Optional) Comma-separated list of columns to drop.
---model: (Optional) Model name (logistic, svm, randomforest, etc.).
---save-model: (Optional) Path to save the trained pipeline.
+  - `ml`: Executes ML pipeline.
+  - `target`: Target column for regression or classification.
+  - `tune`: (Optional) Perform hyperparameter tuning.
+  - `drop`: (Optional) Comma-separated list of columns to drop.
+  - `model`: (Optional) Model name (logistic, svm, randomforest, etc.).
+  - `save-model`: (Optional) Path to save the trained pipeline.
 
 For **unsupervised** clustering:
 
