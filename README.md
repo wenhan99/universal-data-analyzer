@@ -62,7 +62,7 @@ python universal_dataset_ml_pipeline.py <file_path> --ml [--drop COL1,COL2,...] 
 python lab_dataset_ml_pipeline.py <file_path> --load-model MODEL.pkl
 ```
   - `load-model`: Path to a pre-trained pipeline (pickled).
-Note: The dataset columns must match what the model expects (except the target column).
+    Note: The dataset columns must match what the model expects (except the target column).
 
 ## Example Commands
 ### Regression with Tuning & Dropping Columns:
