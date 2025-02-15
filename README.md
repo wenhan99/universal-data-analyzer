@@ -31,7 +31,7 @@ A Python-based command-line tool for comprehensive data analysis, machine learni
 
 1. **Clone** this repository:
    ```bash
-   git clone https://github.com/<YourUsername>/universal-data-analyzer.git
+   git clone https://github.com/wenhan99/universal-data-analyzer.git
 
 ## Usage
 
