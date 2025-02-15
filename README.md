@@ -32,3 +32,25 @@ A Python-based command-line tool for comprehensive data analysis, machine learni
 1. **Clone** this repository:
    ```bash
    git clone https://github.com/<YourUsername>/universal-data-analyzer.git
+
+## Usage
+
+You can run the script in **training mode** or **prediction mode**.
+
+### 1) Training Mode
+
+For **supervised** learning:
+```bash
+python universal_dataset_ml_pipeline.py <file_path> --ml --target <TARGET_COLUMN> [--tune] [--drop COL1,COL2,...] [--model MODEL_NAME] [--save-model MODEL.pkl]
+--ml: Executes ML pipeline.
+--target: Target column for regression or classification.
+--tune: (Optional) Perform hyperparameter tuning.
+--drop: (Optional) Comma-separated list of columns to drop.
+--model: (Optional) Model name (logistic, svm, randomforest, etc.).
+--save-model: (Optional) Path to save the trained pipeline.
+
+For unsupervised clustering:
+
+```bash
+python universal_dataset_ml_pipeline.py <file_path> --ml [--drop COL1,COL2,...] --cluster-model <kmeans|dbscan>
+--cluster-model: Chooses clustering algorithm (default kmeans).
