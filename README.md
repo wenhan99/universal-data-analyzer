@@ -73,7 +73,7 @@ python universal_dataset_ml_pipeline.py data/sample_data.csv --ml --drop id --cl
 python universal_dataset_ml_pipeline.py data/new_data.csv --load-model model_1.pkl
 ```
 
-### Run the Streamlit App
+## Run the Streamlit App
 ```bash
 streamlit run app.py
 ```
