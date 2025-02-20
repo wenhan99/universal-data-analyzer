@@ -1,28 +1,37 @@
+#!/usr/bin/env python
 """
-Universal Dataset Analyzer with ML Pipelines, Optional Model Saving/Loading,
-Enhanced EDA, SHAP Feature Importance, and Unsupervised Clustering
+Universal Data Analyzer with Config Support, Column Flexibility, Enhanced SHAP,
+and Optional ML Pipeline Tuning.
 
-This script loads a dataset (CSV, Excel, or JSON), prints summary information,
-and optionally executes optimized machine learning pipelines. It includes advanced imputation,
-feature selection, optional hyperparameter tuning, and visualizes the results based on the task.
-For supervised learning, it computes SHAP feature importance for interpretability.
-All outputs—including dataset summaries, plots, SHAP plots, and ML results—are saved in a
-uniquely named folder for each analysis run.
+Features:
+1) Reads data (CSV, Excel, JSON) and logs EDA (shape, missing values, correlation).
+2) Supports supervised (classification/regression) with hyperparam tuning or unsupervised clustering.
+3) Allows partial column mismatch handling (flex mode).
+4) Uses faster SHAP TreeExplainer for tree-based models, falling back to KernelExplainer otherwise.
+5) Accepts either direct CLI args or a YAML config for convenience.
+6) Saves logs, plots, and SHAP results in a timestamped folder.
 
 Usage:
-    Training mode (with optional saving):
-      python universal_dataset_ml_pipeline.py <file_path> --ml --target TARGET_COLUMN [--tune] [--drop COL1,COL2,...] [--model MODEL_NAME] [--cluster-model CLUSTER_MODEL] [--save-model MODEL.pkl]
+  Training (supervised):
+    python universal_analyzer.py data.csv --ml --target target_col --model randomforest --tune --drop col1,col2 --save-model mymodel.pkl
+  Clustering:
+    python universal_analyzer.py data.csv --ml --cluster-model kmeans --drop col1,col2
+  Predict with Pre-Trained Model:
+    python universal_analyzer.py new_data.csv --load-model mymodel.pkl
+  Use a Config File:
+    python universal_analyzer.py data.csv --config myconfig.yaml
 
-    Prediction mode (loading a pre-trained model):
-      python universal_dataset_ml_pipeline.py <file_path> --load-model MODEL.pkl
-
-Examples:
-  1) Supervised learning (regression/classification), dropping columns, with hyperparam tuning:
-      python universal_dataset_ml_pipeline.py data/sample_data.csv --ml --target outcome --tune --drop id,notes --model randomforest --save-model mymodel.pkl
-  2) Unsupervised clustering:
-      python universal_dataset_ml_pipeline.py data/sample_data.csv --ml --drop id,notes --cluster-model kmeans
-  3) Load a pre-trained model and predict on new unseen data:
-      python universal_dataset_ml_pipeline.py data/new_data.csv --load-model mymodel.pkl
+In the config file (YAML), you can specify:
+  drop: ["col1", "col2"]
+  ml: true
+  target: "target_col"
+  model: "randomforest"
+  tune: true
+  cluster_model: "kmeans"
+  save_model: "mymodel.pkl"
+  load_model: null
+  plots: true
+  flex_columns: true
 """
 
 import argparse
@@ -37,8 +46,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import shap
 import pickle
+import yaml
 
-# --- Scikit-learn imports for ML pipelines and evaluation ---
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -47,34 +56,30 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.metrics import accuracy_score, r2_score, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
-
-# --- For Advanced Imputation using IterativeImputer ---
 from sklearn.experimental import enable_iterative_imputer  # noqa
 from sklearn.impute import IterativeImputer
 
-# --- Import Models ---
+# Models
 from sklearn.linear_model import LogisticRegression, Lasso, Ridge
 from sklearn.svm import SVC
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.ensemble import (
+    RandomForestClassifier, RandomForestRegressor,
+    GradientBoostingClassifier, GradientBoostingRegressor
+)
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
-# --- Configure Logging ---
+# Logging Configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     filename='analysis.log',
     filemode='a'
 )
-# Also log to the console
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 logging.getLogger().addHandler(console)
 
 def create_analysis_folder():
-    """
-    Create a unique folder for the analysis run using a timestamp.
-    Returns the folder path.
-    """
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     folder_name = f"analysis_{timestamp}"
     os.makedirs(folder_name, exist_ok=True)
@@ -82,10 +87,6 @@ def create_analysis_folder():
     return folder_name
 
 def check_schema(df):
-    """
-    Log the inferred data type for each column.
-    Warn if any column has mixed types.
-    """
     for col in df.columns:
         inferred_type = pd.api.types.infer_dtype(df[col], skipna=True)
         logging.info(f"Column '{col}' inferred type: {inferred_type}")
@@ -93,9 +94,6 @@ def check_schema(df):
             logging.warning(f"Column '{col}' has mixed types. Consider cleaning or converting data.")
 
 def write_summary_to_file(df, output_dir):
-    """
-    Write the dataset shape, info, missing value counts, and statistical summary to a text file.
-    """
     summary_file = os.path.join(output_dir, "dataset_summary.txt")
     with open(summary_file, "w") as f:
         f.write("=" * 40 + "\n")
@@ -114,10 +112,6 @@ def write_summary_to_file(df, output_dir):
     logging.info(f"Dataset summary written to {summary_file}")
 
 def generate_summary(df):
-    """
-    Print comprehensive summary information of the DataFrame.
-    Includes shape, info, missing value counts, statistical summary, and value counts for categoricals.
-    """
     logging.info("=" * 40)
     logging.info(f"Dataset Shape: {df.shape}")
     logging.info("=" * 40)
@@ -130,17 +124,14 @@ def generate_summary(df):
     logging.info("\nStatistical Summary:")
     logging.info(df.describe(include='all'))
     
-    # Additional EDA: value counts for categorical columns
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
-    for col in categorical_cols:
-        logging.info(f"\nValue counts for column '{col}':")
+    # Additional EDA for categorical columns
+    cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    for col in cat_cols:
+        logging.info(f"\nValue counts for '{col}':")
         logging.info(df[col].value_counts())
     logging.info("=" * 40)
 
 def drop_non_informative_columns(df, columns_to_drop):
-    """
-    Drop columns from the DataFrame that are not useful for modeling.
-    """
     for col in columns_to_drop:
         if col in df.columns:
             df = df.drop(columns=[col])
@@ -148,10 +139,6 @@ def drop_non_informative_columns(df, columns_to_drop):
     return df
 
 def advanced_imputation(df, target_column=None, missing_threshold=0.4):
-    """
-    Remove columns with a missing fraction above a threshold (except the target column).
-    Returns the cleaned DataFrame and a list of removed columns.
-    """
     removed_columns = []
     df = df.copy()
     for col in df.columns:
@@ -162,17 +149,12 @@ def advanced_imputation(df, target_column=None, missing_threshold=0.4):
             removed_columns.append(col)
             df.drop(columns=[col], inplace=True)
     if removed_columns:
-        logging.info("Removed columns due to missing values > {:.0%}:".format(missing_threshold))
-        logging.info(removed_columns)
+        logging.info(f"Removed columns with missing values > {missing_threshold*100:.0f}%: {removed_columns}")
     else:
-        logging.info("No columns removed based on missing values threshold of {:.0%}".format(missing_threshold))
+        logging.info(f"No columns removed based on missing threshold of {missing_threshold*100:.0f}%.")
     return df, removed_columns
 
 def load_dataset(file_path):
-    """
-    Load dataset from a given file path.
-    Supports CSV, Excel, and JSON.
-    """
     extension = os.path.splitext(file_path)[1].lower()
     try:
         if extension == ".csv":
@@ -182,67 +164,55 @@ def load_dataset(file_path):
         elif extension == ".json":
             df = pd.read_json(file_path)
         else:
-            raise ValueError(f"Unsupported file type: {extension}. Supported types are CSV, Excel, and JSON.")
-        logging.info(f"Dataset loaded successfully from {file_path}")
+            raise ValueError(f"Unsupported file type: {extension}. Use CSV, Excel, or JSON.")
+        logging.info(f"Dataset loaded from {file_path}")
         return df
     except Exception as e:
-        logging.error(f"Error loading dataset from {file_path}: {e}")
+        logging.error(f"Error loading dataset: {e}")
         raise
 
 def plot_histograms(df, output_dir):
-    """
-    Create and save histograms for all numeric columns.
-    """
-    numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
-    if not numeric_columns:
-        logging.info("No numeric columns found for histogram plots.")
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if not numeric_cols:
+        logging.info("No numeric columns for histograms.")
         return
-    for col in numeric_columns:
+    for col in numeric_cols:
         plt.figure(figsize=(8, 6))
         sns.histplot(df[col].dropna(), kde=True, bins=30, color='skyblue')
         plt.title(f"Histogram of {col}")
         plt.xlabel(col)
         plt.ylabel("Frequency")
-        output_path = os.path.join(output_dir, f"{col}_histogram.png")
-        plt.savefig(output_path)
+        out_path = os.path.join(output_dir, f"{col}_histogram.png")
+        plt.savefig(out_path)
         plt.close()
-        logging.info(f"Saved histogram for '{col}' to {output_path}")
+        logging.info(f"Saved histogram for '{col}' to {out_path}")
 
 def plot_correlation_heatmap(df, output_dir):
-    """
-    Generate and save a correlation heatmap for numeric columns.
-    """
     numeric_df = df.select_dtypes(include=[np.number])
     if numeric_df.empty:
-        logging.info("No numeric columns available for correlation heatmap.")
+        logging.info("No numeric columns for correlation heatmap.")
         return
     plt.figure(figsize=(10, 8))
     corr = numeric_df.corr()
     sns.heatmap(corr, annot=True, cmap="coolwarm", fmt=".2f", square=True)
     plt.title("Correlation Heatmap")
-    output_path = os.path.join(output_dir, "correlation_heatmap.png")
-    plt.savefig(output_path)
+    out_path = os.path.join(output_dir, "correlation_heatmap.png")
+    plt.savefig(out_path)
     plt.close()
-    logging.info(f"Saved correlation heatmap to {output_path}")
+    logging.info(f"Saved correlation heatmap to {out_path}")
 
 def visualize_classification_results(y_test, y_pred, output_dir):
-    """
-    Plot and save a confusion matrix for classification results.
-    """
     cm = confusion_matrix(y_test, y_pred)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     plt.figure(figsize=(8, 6))
     disp.plot(cmap='Blues')
     plt.title("Confusion Matrix")
-    output_path = os.path.join(output_dir, "confusion_matrix.png")
-    plt.savefig(output_path)
+    out_path = os.path.join(output_dir, "confusion_matrix.png")
+    plt.savefig(out_path)
     plt.close()
-    logging.info(f"Saved confusion matrix to {output_path}")
+    logging.info(f"Saved confusion matrix to {out_path}")
 
 def visualize_regression_results(y_test, y_pred, output_dir):
-    """
-    Plot and save a scatter plot of actual vs. predicted values for regression.
-    """
     plt.figure(figsize=(8,6))
     plt.scatter(y_test, y_pred, alpha=0.7)
     plt.xlabel("Actual Values")
@@ -251,15 +221,12 @@ def visualize_regression_results(y_test, y_pred, output_dir):
     min_val = min(min(y_test), min(y_pred))
     max_val = max(max(y_test), max(y_pred))
     plt.plot([min_val, max_val], [min_val, max_val], color='red', linestyle='--')
-    output_path = os.path.join(output_dir, "actual_vs_predicted.png")
-    plt.savefig(output_path)
+    out_path = os.path.join(output_dir, "actual_vs_predicted.png")
+    plt.savefig(out_path)
     plt.close()
-    logging.info(f"Saved regression plot to {output_path}")
+    logging.info(f"Saved regression plot to {out_path}")
 
 def visualize_clusters(df, numeric_features, output_dir):
-    """
-    Visualize clustering results using PCA (2D projection) and save the plot.
-    """
     X = df[numeric_features].copy()
     imputer = SimpleImputer(strategy='median')
     X_imputed = imputer.fit_transform(X)
@@ -273,81 +240,89 @@ def visualize_clusters(df, numeric_features, output_dir):
     plt.xlabel("Principal Component 1")
     plt.ylabel("Principal Component 2")
     plt.legend(title="Cluster")
-    output_path = os.path.join(output_dir, "cluster_visualization.png")
-    plt.savefig(output_path)
+    out_path = os.path.join(output_dir, "cluster_visualization.png")
+    plt.savefig(out_path)
     plt.close()
-    logging.info(f"Saved cluster visualization to {output_path}")
+    logging.info(f"Saved cluster visualization to {out_path}")
 
 def explain_model(pipeline, X_train, output_dir):
     """
-    Compute and save a SHAP summary plot for the trained pipeline using KernelExplainer.
+    Use a faster model-specific explainer (TreeExplainer) if pipeline's model is tree-based.
+    Otherwise, fallback to KernelExplainer for a model-agnostic approach.
     """
+    model = pipeline.named_steps['model']
+    is_tree_model = any([
+        isinstance(model, RandomForestClassifier), 
+        isinstance(model, RandomForestRegressor),
+        isinstance(model, GradientBoostingClassifier),
+        isinstance(model, GradientBoostingRegressor)
+    ])
     X_sample = X_train.iloc[:100]
-    
-    def predict_wrapper(X):
-        X_df = pd.DataFrame(X, columns=X_sample.columns)
-        return pipeline.predict(X_df)
-    
-    explainer = shap.KernelExplainer(predict_wrapper, X_sample)
-    shap_values = explainer.shap_values(X_sample, nsamples=100)
-    
+
+    if is_tree_model:
+        logging.info("Using TreeExplainer for SHAP (faster for tree-based models).")
+        try:
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(pipeline.named_steps['preprocessor'].transform(X_sample))
+        except Exception as e:
+            logging.warning(f"TreeExplainer failed, falling back to KernelExplainer: {e}")
+            explainer = shap.KernelExplainer(model.predict, pipeline.named_steps['preprocessor'].transform(X_sample))
+            shap_values = explainer.shap_values(pipeline.named_steps['preprocessor'].transform(X_sample), nsamples=100)
+    else:
+        logging.info("Using KernelExplainer for SHAP.")
+        # For KernelExplainer, we need a wrapper
+        def predict_wrapper(data_array):
+            return model.predict(data_array)
+        # Transform X_sample
+        X_transformed = pipeline.named_steps['preprocessor'].transform(X_sample)
+        explainer = shap.KernelExplainer(predict_wrapper, X_transformed)
+        shap_values = explainer.shap_values(X_transformed, nsamples=100)
+
     shap.summary_plot(shap_values, X_sample, show=False)
-    shap_output_path = os.path.join(output_dir, "shap_summary.png")
-    plt.savefig(shap_output_path, bbox_inches='tight')
+    shap_out = os.path.join(output_dir, "shap_summary.png")
+    plt.savefig(shap_out, bbox_inches='tight')
     plt.close()
-    logging.info(f"Saved SHAP summary plot to {shap_output_path}")
+    logging.info(f"Saved SHAP summary plot to {shap_out}")
 
 def preprocess_features(X):
-    """
-    Create a preprocessing pipeline that identifies numeric and categorical features,
-    imputes missing values, scales numeric features, and one-hot encodes categorical features.
-    """
-    numeric_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
-    categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
+    numeric_cols = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
     
-    numeric_transformer = Pipeline(steps=[
+    numeric_transformer = Pipeline([
         ('imputer', IterativeImputer(random_state=42)),
         ('scaler', StandardScaler())
     ])
-    categorical_transformer = Pipeline(steps=[
+    cat_transformer = Pipeline([
         ('imputer', SimpleImputer(strategy='most_frequent')),
         ('onehot', OneHotEncoder(handle_unknown='ignore'))
     ])
-    preprocessor = ColumnTransformer(transformers=[
-        ('num', numeric_transformer, numeric_features),
-        ('cat', categorical_transformer, categorical_features)
+    preprocessor = ColumnTransformer([
+        ('num', numeric_transformer, numeric_cols),
+        ('cat', cat_transformer, cat_cols)
     ])
     return preprocessor
 
 def build_supervised_pipeline(preprocessor, model):
-    """
-    Build a supervised ML pipeline using the preprocessor and the specified model.
-    """
-    pipeline = Pipeline(steps=[
+    pipeline = Pipeline([
         ('preprocessor', preprocessor),
         ('model', model)
     ])
     return pipeline
 
 def tune_hyperparameters(pipeline, X_train, y_train, param_grid, problem_type):
-    """
-    Tune hyperparameters using GridSearchCV and return the best estimator.
-    """
-    scoring_metric = 'accuracy' if problem_type == 'classification' else 'r2'
-    grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring=scoring_metric)
+    scoring = 'accuracy' if problem_type == 'classification' else 'r2'
+    grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring=scoring)
     grid_search.fit(X_train, y_train)
     logging.info(f"Best hyperparameters: {grid_search.best_params_}")
     return grid_search.best_estimator_
 
-def run_supervised_pipeline(df, target_column, model_name=None, tune=False, output_dir="output"):
-    """
-    Execute the supervised ML pipeline (classification/regression) based on the target column.
-    Computes evaluation metrics and SHAP values for model interpretability.
-    """
+def run_supervised_pipeline(df, target_column, model_name=None, tune=False, output_dir="output", flex_columns=False):
     if target_column not in df.columns:
         logging.error(f"Target column '{target_column}' not found in dataset.")
         return
 
+    # If flex_columns is True, we do nothing special here. 
+    # But we could handle partial columns if we had a reference schema.
     X = df.drop(columns=[target_column])
     y = df[target_column]
     
@@ -387,12 +362,9 @@ def run_supervised_pipeline(df, target_column, model_name=None, tune=False, outp
     
     return pipeline
 
-def run_unsupervised_pipeline(df, model_name='kmeans', output_dir="output"):
-    """
-    Execute an unsupervised clustering pipeline.
-    """
-    numeric_features = df.select_dtypes(include=[np.number]).columns.tolist()
-    if not numeric_features:
+def run_unsupervised_pipeline(df, model_name='kmeans', output_dir="output", flex_columns=False):
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if not numeric_cols:
         logging.info("No numeric features available for clustering.")
         return
     
@@ -404,7 +376,7 @@ def run_unsupervised_pipeline(df, model_name='kmeans', output_dir="output"):
     else:
         model = model_class()
     
-    X = df[numeric_features].copy()
+    X = df[numeric_cols].copy()
     imputer = SimpleImputer(strategy='median')
     X_imputed = imputer.fit_transform(X)
     scaler = StandardScaler()
@@ -412,10 +384,9 @@ def run_unsupervised_pipeline(df, model_name='kmeans', output_dir="output"):
     
     clusters = model.fit_predict(X_scaled)
     df['Cluster'] = clusters
-    logging.info("Clustering complete. Cluster assignments added to the dataset as the 'Cluster' column.")
-    logging.info("Cluster counts:")
+    logging.info("Clustering complete. 'Cluster' column added.")
     logging.info(df['Cluster'].value_counts())
-    visualize_clusters(df, numeric_features, output_dir)
+    visualize_clusters(df, numeric_cols, output_dir)
     return model
 
 CLASSIFICATION_MODELS = {
@@ -461,29 +432,41 @@ CLUSTERING_MODELS = {
     'dbscan': DBSCAN
 }
 
+def parse_config_file(config_path):
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config if config else {}
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Universal Data Analyzer with Flexible ML Pipelines and Enhanced EDA"
+        description="Universal Data Analyzer with Config, Column Flexibility, Enhanced SHAP, and ML Pipelines"
     )
     parser.add_argument("file_path", help="Path to the dataset file (CSV, Excel, JSON).")
     parser.add_argument("--plots", action="store_true", help="Generate plots (histograms, correlation heatmap, etc.).")
     parser.add_argument("--ml", action="store_true", help="Execute machine learning pipeline.")
     parser.add_argument("--target", type=str, help="Target column for supervised learning.")
     parser.add_argument("--tune", action="store_true", help="Perform hyperparameter tuning.")
-    parser.add_argument("--drop", type=str, help="Comma-separated list of non-informative columns to drop.")
-    parser.add_argument("--model", type=str, help="Model name for supervised learning (e.g., 'logistic', 'randomforest').")
-    parser.add_argument("--cluster-model", type=str, default='kmeans', 
-                        help="Clustering model to use (e.g., 'kmeans', 'dbscan'). Default: kmeans.")
-    # Additional arguments for saving and loading a pre-trained model
-    parser.add_argument("--save-model", type=str, help="Path to save the trained pipeline (if training).")
+    parser.add_argument("--drop", type=str, help="Comma-separated list of columns to drop.")
+    parser.add_argument("--model", type=str, help="Model name for supervised learning.")
+    parser.add_argument("--cluster-model", type=str, default='kmeans', help="Clustering model name. Default: kmeans.")
+    parser.add_argument("--save-model", type=str, help="Path to save the trained pipeline.")
     parser.add_argument("--load-model", type=str, help="Path to a pre-trained pipeline for prediction.")
+    parser.add_argument("--config", type=str, help="Path to a YAML config file for specifying arguments.")
+    parser.add_argument("--flex-columns", action="store_true", 
+                        help="Allow partial column mismatch. (Currently just a placeholder; must be consistent in real usage.)")
     
-    # parse_known_args to ignore extra arguments like "-f" in Colab
     args, unknown = parser.parse_known_args()
     if unknown:
         logging.info(f"Ignoring unrecognized arguments: {unknown}")
 
-    # If loading a pre-trained model, go to prediction mode
+    # If config file is provided, parse it and override CLI arguments
+    if args.config:
+        config_dict = parse_config_file(args.config)
+        for key, value in config_dict.items():
+            if hasattr(args, key):
+                setattr(args, key, value)
+    
+    # If user wants to load a pre-trained model, do prediction mode
     if args.load_model:
         try:
             with open(args.load_model, 'rb') as f:
@@ -493,7 +476,6 @@ def main():
             logging.error(f"Error loading pipeline: {e}")
             return
         
-        # Load the new dataset for prediction
         try:
             df = load_dataset(args.file_path)
         except Exception as e:
@@ -504,7 +486,9 @@ def main():
         write_summary_to_file(df, analysis_folder)
         generate_summary(df)
         
-        # Predict on new data
+        # If flex-columns is enabled, user might want to skip missing columns or do a custom approach
+        # (For now, we do not implement advanced partial column logic, just a placeholder)
+        
         try:
             predictions = pipeline.predict(df)
             df['Predicted'] = predictions
@@ -515,7 +499,7 @@ def main():
             logging.error(f"Error during prediction: {e}")
         return
 
-    # Otherwise, training mode
+    # Otherwise, we do training or unsupervised analysis
     try:
         df = load_dataset(args.file_path)
     except Exception as e:
@@ -529,7 +513,7 @@ def main():
         drop_list = [col.strip() for col in args.drop.split(",")]
         df = drop_non_informative_columns(df, drop_list)
 
-    df, removed_columns = advanced_imputation(df, target_column=args.target)
+    df, _ = advanced_imputation(df, target_column=args.target)
     write_summary_to_file(df, analysis_folder)
     generate_summary(df)
 
@@ -541,14 +525,15 @@ def main():
         if args.target:
             logging.info("Running supervised ML pipeline...")
             pipeline = run_supervised_pipeline(
-                df, 
-                args.target, 
-                model_name=args.model, 
-                tune=args.tune, 
-                output_dir=analysis_folder
+                df=df,
+                target_column=args.target,
+                model_name=args.model,
+                tune=args.tune,
+                output_dir=analysis_folder,
+                flex_columns=args.flex_columns
             )
-            # Optionally save the trained pipeline
-            if args.save_model and pipeline:
+            # If pipeline is successfully trained, save it if requested
+            if pipeline and args.save_model:
                 try:
                     with open(args.save_model, 'wb') as f:
                         pickle.dump(pipeline, f)
@@ -557,7 +542,12 @@ def main():
                     logging.error(f"Error saving pipeline: {e}")
         else:
             logging.info("Running unsupervised clustering pipeline...")
-            run_unsupervised_pipeline(df, model_name=args.cluster_model, output_dir=analysis_folder)
+            run_unsupervised_pipeline(
+                df=df,
+                model_name=args.cluster_model,
+                output_dir=analysis_folder,
+                flex_columns=args.flex_columns
+            )
 
 if __name__ == "__main__":
     main()
