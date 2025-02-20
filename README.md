@@ -1,37 +1,30 @@
-# Universal Data Analyzer
+# UniML Explorer
 
-A Python-based command-line tool for comprehensive data analysis, machine learning (ML) pipelines, and result visualization. It supports various data formats (CSV, Excel, JSON), advanced imputation, optional hyperparameter tuning, clustering, SHAP feature importance, and more.
+A Python-based solution for end-to-end data ingestion, exploratory data analysis (EDA), and machine learning (ML) pipelines. Includes a Streamlit GUI (`app.py`) for easy file uploads, column-dropping, supervised/unsupervised ML, and visualization.
 
-## Key Features
+## Features
 
-- **Data Loading & EDA**: Reads CSV/Excel/JSON files and provides descriptive statistics, missing-value summaries, correlation heatmaps, and histogram plots.
-- **Flexible ML Pipelines**:
+- **Ingestion**: Accepts CSV, Excel, or JSON.
+- **Exploratory Analysis**: Logs dataset summary, missing values, and statistical info.
+- **Optional Plots**: Histograms, correlation heatmaps.
+- **ML Pipelines**:
   - **Supervised** (Classification or Regression) with optional hyperparameter tuning.
   - **Unsupervised** (Clustering) with PCA-based visualization.
-- **Advanced Imputation**: IterativeImputer (or SimpleImputer) to handle missing data effectively.
-- **Column Dropping**: Optionally remove non-informative columns.
-- **SHAP Interpretability**: Generates SHAP plots to explain model predictions.
-- **Unique Output Folder**: Each run creates a timestamped folder for logs, plots, and outputs.
+- **Streamlit GUI**: Non-technical users can upload data, select columns to drop, specify target column, and run analysis with a single click.
 
 ## Requirements
-
-- **Python** 3.7+ recommended
-- Core packages:
-  - `numpy`
-  - `pandas`
-  - `scikit-learn`
-  - `matplotlib`
-  - `seaborn`
-  - `shap`
-  - `pickle` (part of Python’s standard library, used for model serialization)
-  - `argparse` (standard library)
-  - `logging` (standard library)
+See [requirements.txt](requirements.txt) for the full list. Install via:
+```bash
+pip install -r requirements.txt
+```
  
 ## Installation
 
 1. **Clone** this repository:
    ```bash
    git clone https://github.com/wenhan99/universal-data-analyzer.git
+   cd universal-data-analyzer
+   ```
 
 ## Usage
 
@@ -59,7 +52,7 @@ python universal_dataset_ml_pipeline.py <file_path> --ml [--drop COL1,COL2,...] 
 
 ### 2) Prediction Mode (Load a Pre-Trained Model)
 ```bash
-python lab_dataset_ml_pipeline.py <file_path> --load-model MODEL.pkl
+python universal_dataset_ml_pipeline.py <file_path> --load-model MODEL.pkl
 ```
   - `load-model`: Path to a pre-trained pipeline (pickled).
     Note: The dataset columns must match what the model expects (except the target column).
@@ -67,7 +60,7 @@ python lab_dataset_ml_pipeline.py <file_path> --load-model MODEL.pkl
 ## Example Commands
 ### Regression with Tuning & Dropping Columns:
 ```bash
-python universal_dataset_ml_pipeline.py data/california_housing.csv --ml --target median_house_value --tune --drop ocean_proximity --model ridge --save-model cali_model.pkl
+python universal_dataset_ml_pipeline.py data/sample_data.csv --ml --target outcome --tune --drop id --model randomforest --save-model model_1.pkl
 ```
 
 ### Clustering (Unsupervised):
@@ -77,8 +70,18 @@ python universal_dataset_ml_pipeline.py data/sample_data.csv --ml --drop id --cl
 
 ### Load Model & Predict:
 ```bash
-python universal_dataset_ml_pipeline.py data/new_data.csv --load-model cali_model.pkl
+python universal_dataset_ml_pipeline.py data/new_data.csv --load-model model_1.pkl
 ```
+
+### Run the Streamlit App
+```bash
+streamlit run app.py
+```
+Open your browser to the URL shown (e.g., HTTP://localhost:8501), then interact with the app.
+  - Upload your data (CSV, Excel, or JSON)
+  - (Optional) Choose columns to drop.
+  - (Optional) Check "Run ML Pipeline" and select a target column for supervised or leave blank for unsupervised.
+  - Click *Run Analysis* to generate logs, EDA, plots, and ML results.
 
 ## Outputs
 Each run creates a timestamped folder (e.g., analysis_20230915_143210) containing:
@@ -88,6 +91,11 @@ Each run creates a timestamped folder (e.g., analysis_20230915_143210) containin
   - Plots (histograms, correlation heatmaps, confusion matrices, etc.).
   - SHAP Summary (shap_summary.png).
   - Predictions (when loading a model for inference)
+
+## File Structure
+  - `app.py`: Streamlit GUI for user interaction.
+  - `universal_dataset_ml_pipeline.py`: Core pipeline logic for data cleaning, imputation, EDA logs, supervised/unsupervised ML, and SHAP interpretability.
+  - `requirements.txt`: Python dependencies.
 
 ## Contributing
 Feel free to submit pull requests or open issues if you want to improve the pipeline, add new features, or enhance its flexibility.
